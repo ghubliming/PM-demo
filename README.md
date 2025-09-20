@@ -110,6 +110,42 @@ The current implementation provides a fully functional UI with mock data to demo
 3. **Create Markets**: Use "Create Market" button to add new prediction markets
 4. **Real-time Updates**: See odds update based on stake distribution
 
+## 🚀 Deployment
+
+### GitHub Pages Deployment
+
+This application is configured for automatic deployment to GitHub Pages. The deployment happens automatically when changes are pushed to the main branch.
+
+#### Live Demo
+- **URL**: [https://ghubliming.github.io/PM-demo/](https://ghubliming.github.io/PM-demo/)
+
+#### Automatic Deployment Setup
+1. **GitHub Actions**: The repository includes a workflow (`.github/workflows/deploy.yml`) that automatically builds and deploys the app
+2. **Static Export**: Next.js is configured for static export in `next.config.ts`
+3. **Build Process**: The frontend is built using `npm run export` which generates static files in the `out/` directory
+
+#### Manual Deployment (if needed)
+To deploy manually or set up in your own repository:
+
+1. **Enable GitHub Pages**:
+   - Go to repository Settings > Pages
+   - Set source to "GitHub Actions"
+
+2. **Build and Deploy**:
+```bash
+cd frontend
+npm install
+NODE_ENV=production npm run export
+```
+
+The static files will be generated in `frontend/out/` and automatically deployed by GitHub Actions.
+
+#### Configuration Details
+- **Base Path**: Configured for `/PM-demo` to work with GitHub Pages subdirectory
+- **Static Export**: All pages are pre-rendered as static HTML
+- **Asset Optimization**: Images and assets are optimized for static hosting
+- **No Jekyll**: `.nojekyll` file included to prevent GitHub Jekyll processing
+
 ## 🔮 Future Development Roadmap
 
 ### Phase 1: Web3 Integration
