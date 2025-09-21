@@ -16,18 +16,25 @@ This project demonstrates the core functionality of a decentralized prediction m
 
 ### ✅ Current Features
 
+- **User Account System**: Login/signup with username, new users get 100 ETH starting balance
+- **Real Betting Logic**: Actual balance deduction, position tracking, and stake updates
 - **Market Display**: View all active prediction markets with real-time odds
 - **Market Creation**: Create new prediction markets with custom questions and options
-- **Position Trading**: Place bets on market outcomes (UI complete - ready for Web3 integration)
-- **Real-time Odds**: Dynamic odds calculation based on stake distribution
+- **Position Trading**: Place real bets that affect user balances and market dynamics
+- **Market Maker Algorithm**: Pseudo liquidity system that balances markets when imbalances exceed 80%
+- **User Portfolio**: Track positions across multiple markets with real-time updates
+- **Balance Management**: Comprehensive balance validation and transaction history
+- **Data Persistence**: User accounts, positions, and market states saved in localStorage
+- **Real-time Odds**: Dynamic odds calculation based on actual stake distribution
 - **Responsive UI**: Mobile-friendly interface built with Next.js and Tailwind CSS
-- **Market Management**: Track market expiration times and volumes
+
+![Functional Prediction Markets](https://github.com/user-attachments/assets/7f478e89-3f5d-4545-b052-7832ec5ea057)
+
+*Screenshot showing the fully functional system with user login, balance tracking, position management, and market maker functionality*
 
 ![Betting Modal](https://github.com/user-attachments/assets/a821e81f-c28b-4d7b-89b4-3a6eceb11364)
 
 ![Create Market Modal](https://github.com/user-attachments/assets/091af255-f640-449f-8c38-b07c834c1895)
-
-![Multiple Markets](https://github.com/user-attachments/assets/47254ee9-bb04-43bb-87d3-9bb6616f957e)
 
 ### 🏗️ Smart Contract Architecture
 
@@ -101,14 +108,24 @@ npm install
 3. Test market creation and betting functionality
 4. View responsive design on different screen sizes
 
-## 🎮 Demo Functionality
+## 🎮 Live Functionality
 
-The current implementation provides a fully functional UI with mock data to demonstrate:
+The application now provides a fully functional prediction market system with real user accounts:
 
-1. **Browse Markets**: View existing prediction markets with odds and volume
-2. **Place Bets**: Click on any market option to open betting modal
-3. **Create Markets**: Use "Create Market" button to add new prediction markets
-4. **Real-time Updates**: See odds update based on stake distribution
+1. **User Registration**: Create an account with any username, automatically receive 100 ETH starting balance
+2. **Account Management**: Secure login/logout with persistent data storage
+3. **Real Betting**: Place actual bets that deduct from your balance and update market stakes
+4. **Portfolio Tracking**: View all your positions across markets with real-time values  
+5. **Market Creation**: Create new prediction markets that other users can bet on
+6. **Market Maker**: Intelligent liquidity algorithm prevents extreme market imbalances
+7. **Live Updates**: All odds, stakes, and balances update instantly with real calculations
+
+### Key Features:
+- **Starting Balance**: Every new user gets 100 ETH to begin trading
+- **Balance Validation**: Cannot bet more than your available balance
+- **Position Persistence**: All positions saved and restored between sessions
+- **Market Balancing**: When bets create >80% imbalance, market maker adds counter-liquidity
+- **Real-time Odds**: Odds calculated from actual stake distributions, not mock data
 
 ## 🚀 Deployment
 
