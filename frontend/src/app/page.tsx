@@ -13,6 +13,9 @@ interface Market {
   option2Stakes: number;
   resolved: boolean;
   winner: number;
+  resolutionTime?: number;
+  disputed?: boolean;
+  disputeEndTime?: number;
 }
 
 interface User {
@@ -20,6 +23,18 @@ interface User {
   name: string;
   balance: number;
   positions: { [marketId: number]: { option1Amount: number; option2Amount: number } };
+  isAdmin?: boolean;
+}
+
+interface Dispute {
+  marketId: number;
+  disputer: string;
+  proposedWinner: number;
+  bondAmount: number;
+  disputeTime: number;
+  resolved: boolean;
+  disputeValid: boolean;
+  reason: string;
 }
 
 interface UserBet {
@@ -44,6 +59,15 @@ export default function Home() {
     option2: '',
     duration: '24'
   });
+
+  // New states for dispute functionality
+  const [showDisputeModal, setShowDisputeModal] = useState(false);
+  const [selectedDisputeMarket, setSelectedDisputeMarket] = useState<Market | null>(null);
+  const [disputeReason, setDisputeReason] = useState('');
+  const [disputeBond, setDisputeBond] = useState('0.1');
+  const [proposedWinner, setProposedWinner] = useState<number>(1);
+  const [showAdminPanel, setShowAdminPanel] = useState(false);
+  const [marketDisputes, setMarketDisputes] = useState<{[marketId: number]: Dispute[]}>({});
 
   // Initialize user system and mock data
   useEffect(() => {
@@ -83,8 +107,29 @@ export default function Home() {
         option2Stakes: 1.7,
         resolved: false,
         winner: 0
+      },
+      {
+        id: 2,
+        question: "Will Apple stock close above $200 this week?",
+        option1: "Yes, AAPL > $200",
+        option2: "No, AAPL <= $200",
+        endTime: Date.now() - 2 * 60 * 60 * 1000, // Ended 2 hours ago
+        totalStaked: 4.0,
+        option1Stakes: 1.5,
+        option2Stakes: 2.5,
+        resolved: true,
+        winner: 1,
+        resolutionTime: Date.now() - 60 * 60 * 1000, // Resolved 1 hour ago
+        disputed: false,
+        disputeEndTime: Date.now() + 23 * 60 * 60 * 1000 // 23 hours left for disputes
       }
     ];
+    
+    // Initialize mock disputes
+    const mockDisputes: {[marketId: number]: Dispute[]} = {
+      2: [] // No disputes for resolved market yet
+    };
+    setMarketDisputes(mockDisputes);
     
     // Load saved markets or use defaults
     const savedMarkets = localStorage.getItem('predictionMarkets');
@@ -273,7 +318,8 @@ export default function Home() {
       id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
       name: name.trim(),
       balance: 100, // Starting balance of 100 ETH
-      positions: {}
+      positions: {},
+      isAdmin: name.toLowerCase().includes('admin') // Simple admin detection
     };
     return newUser;
   };
@@ -306,6 +352,153 @@ export default function Home() {
       return { option1Amount: 0, option2Amount: 0 };
     }
     return currentUser.positions[marketId];
+  };
+
+  // Dispute-related helper functions
+  const isInDisputePeriod = (market: Market): boolean => {
+    if (!market.resolved || !market.disputeEndTime) return false;
+    return Date.now() < market.disputeEndTime && !market.disputed;
+  };
+
+  const canClaimRewards = (market: Market): boolean => {
+    if (!market.resolved) return false;
+    if (market.disputed) return false;
+    if (market.disputeEndTime && Date.now() <= market.disputeEndTime) return false;
+    return true;
+  };
+
+  const getDisputeTimeLeft = (market: Market): string => {
+    if (!market.disputeEndTime || !market.resolved || market.disputed) return "";
+    const timeLeft = market.disputeEndTime - Date.now();
+    if (timeLeft <= 0) return "Dispute period ended";
+    
+    const hours = Math.floor(timeLeft / (60 * 60 * 1000));
+    const minutes = Math.floor((timeLeft % (60 * 60 * 1000)) / (60 * 1000));
+    return `${hours}h ${minutes}m left to dispute`;
+  };
+
+  const handleDispute = () => {
+    if (!selectedDisputeMarket || !currentUser) return;
+    
+    const bondAmount = parseFloat(disputeBond);
+    if (bondAmount < 0.1) {
+      alert('Minimum dispute bond is 0.1 ETH');
+      return;
+    }
+    
+    if (bondAmount > currentUser.balance) {
+      alert('Insufficient balance for dispute bond');
+      return;
+    }
+    
+    if (!disputeReason.trim()) {
+      alert('Please provide a reason for the dispute');
+      return;
+    }
+
+    if (proposedWinner === selectedDisputeMarket.winner) {
+      alert('Cannot dispute with the same winner');
+      return;
+    }
+
+    // Create new dispute
+    const newDispute: Dispute = {
+      marketId: selectedDisputeMarket.id,
+      disputer: currentUser.id,
+      proposedWinner,
+      bondAmount,
+      disputeTime: Date.now(),
+      resolved: false,
+      disputeValid: false,
+      reason: disputeReason
+    };
+
+    // Update market as disputed
+    const updatedMarkets = markets.map(m => 
+      m.id === selectedDisputeMarket.id 
+        ? { ...m, disputed: true }
+        : m
+    );
+    setMarkets(updatedMarkets);
+
+    // Update user balance (deduct bond)
+    const updatedUser = { ...currentUser, balance: currentUser.balance - bondAmount };
+    setCurrentUser(updatedUser);
+
+    // Add dispute to market disputes
+    const updatedDisputes = { ...marketDisputes };
+    if (!updatedDisputes[selectedDisputeMarket.id]) {
+      updatedDisputes[selectedDisputeMarket.id] = [];
+    }
+    updatedDisputes[selectedDisputeMarket.id].push(newDispute);
+    setMarketDisputes(updatedDisputes);
+
+    // Reset and close modal
+    setDisputeReason('');
+    setDisputeBond('0.1');
+    setProposedWinner(1);
+    setShowDisputeModal(false);
+    setSelectedDisputeMarket(null);
+
+    alert(`Dispute submitted successfully! Bond of ${bondAmount} ETH has been deducted from your balance.`);
+  };
+
+  const resolveDispute = (marketId: number, disputeIndex: number, isValid: boolean) => {
+    if (!currentUser?.isAdmin) {
+      alert('Only admins can resolve disputes');
+      return;
+    }
+
+    const market = markets.find(m => m.id === marketId);
+    const disputes = marketDisputes[marketId];
+    
+    if (!market || !disputes || !disputes[disputeIndex]) return;
+    
+    const dispute = disputes[disputeIndex];
+    
+    // Update dispute as resolved
+    const updatedDisputes = { ...marketDisputes };
+    updatedDisputes[marketId][disputeIndex] = { 
+      ...dispute, 
+      resolved: true, 
+      disputeValid: isValid 
+    };
+    setMarketDisputes(updatedDisputes);
+
+    // Update market
+    let updatedMarkets = markets.map(m => {
+      if (m.id === marketId) {
+        const updatedMarket = { ...m, disputed: false };
+        if (isValid) {
+          // Change winner to disputed winner
+          updatedMarket.winner = dispute.proposedWinner;
+        }
+        return updatedMarket;
+      }
+      return m;
+    });
+    setMarkets(updatedMarkets);
+
+    // Handle bond return/slashing
+    if (isValid) {
+      // Return bond to disputer
+      const existingUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+      const updatedUsers = existingUsers.map((user: User) => {
+        if (user.id === dispute.disputer) {
+          return { ...user, balance: user.balance + dispute.bondAmount };
+        }
+        return user;
+      });
+      localStorage.setItem('allUsers', JSON.stringify(updatedUsers));
+      
+      // Update current user if they are the disputer
+      if (currentUser.id === dispute.disputer) {
+        setCurrentUser({ ...currentUser, balance: currentUser.balance + dispute.bondAmount });
+      }
+    }
+    // If invalid, bond is slashed (no return)
+
+    alert(`Dispute ${isValid ? 'accepted' : 'rejected'}. ${isValid ? 'Bond returned to disputer.' : 'Bond slashed.'}`);
   };
 
   const formatTimeLeft = (endTime: number) => {
@@ -454,11 +647,22 @@ export default function Home() {
                   <div className="text-right">
                     <div className="text-sm font-medium text-gray-900 dark:text-white">
                       Welcome, {currentUser.name}
+                      {currentUser.isAdmin && <span className="ml-2 text-xs bg-purple-100 text-purple-800 px-2 py-1 rounded">Admin</span>}
                     </div>
                     <div className="text-sm text-green-600 dark:text-green-400 font-bold">
                       Balance: {currentUser.balance.toFixed(3)} ETH
                     </div>
                   </div>
+                  
+                  {currentUser.isAdmin && (
+                    <button
+                      onClick={() => setShowAdminPanel(true)}
+                      className="bg-purple-600 hover:bg-purple-700 text-white px-4 py-2 rounded-lg font-medium"
+                    >
+                      🛡️ Admin Panel
+                    </button>
+                  )}
+                  
                   <button
                     onClick={() => setShowCreateMarket(true)}
                     className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
@@ -501,9 +705,22 @@ export default function Home() {
                   <h2 className="text-xl font-semibold text-gray-900 dark:text-white">
                     {market.question}
                   </h2>
-                  <span className="text-sm text-gray-500 dark:text-gray-400">
-                    {formatTimeLeft(market.endTime)}
-                  </span>
+                  <div className="text-right">
+                    <div className="text-sm text-gray-500 dark:text-gray-400">
+                      {formatTimeLeft(market.endTime)}
+                    </div>
+                    {market.resolved && (
+                      <div className="text-xs mt-1">
+                        {market.disputed ? (
+                          <span className="text-orange-600 font-medium">🔶 Disputed</span>
+                        ) : isInDisputePeriod(market) ? (
+                          <span className="text-yellow-600">{getDisputeTimeLeft(market)}</span>
+                        ) : (
+                          <span className="text-green-600">✓ Final</span>
+                        )}
+                      </div>
+                    )}
+                  </div>
                 </div>
                 
                 {/* Enhanced Market Info */}
@@ -586,6 +803,74 @@ export default function Home() {
                 {!currentUser && (
                   <div className="text-center py-2 text-sm text-gray-500 dark:text-gray-400">
                     Login to place bets on this market
+                  </div>
+                )}
+                
+                {/* Dispute and Admin Actions */}
+                {currentUser && market.resolved && (
+                  <div className="mt-4 space-y-2">
+                    {/* Dispute Button */}
+                    {isInDisputePeriod(market) && (
+                      <button
+                        onClick={() => {
+                          setSelectedDisputeMarket(market);
+                          setProposedWinner(market.winner === 1 ? 2 : 1);
+                          setShowDisputeModal(true);
+                        }}
+                        className="w-full bg-orange-600 hover:bg-orange-700 text-white px-4 py-2 rounded-lg font-medium text-sm"
+                      >
+                        🔶 Dispute Result (Requires {parseFloat(disputeBond)} ETH bond)
+                      </button>
+                    )}
+                    
+                    {/* Market Winner Display */}
+                    {market.resolved && (
+                      <div className="text-center p-2 bg-gray-100 dark:bg-gray-700 rounded">
+                        <span className="text-sm font-medium">
+                          Winner: {market.winner === 1 ? market.option1 : market.option2}
+                        </span>
+                        {market.disputed && (
+                          <div className="text-xs text-orange-600 mt-1">Under dispute</div>
+                        )}
+                      </div>
+                    )}
+                    
+                    {/* Admin Controls */}
+                    {currentUser.isAdmin && market.disputed && marketDisputes[market.id]?.length > 0 && (
+                      <div className="border-t pt-2">
+                        <div className="text-xs font-medium text-gray-600 dark:text-gray-400 mb-2">Admin Controls:</div>
+                        {marketDisputes[market.id].filter(d => !d.resolved).map((dispute, index) => (
+                          <div key={index} className="bg-yellow-50 dark:bg-yellow-900/20 p-2 rounded text-xs mb-2">
+                            <div><strong>Dispute:</strong> {dispute.reason}</div>
+                            <div><strong>Proposed Winner:</strong> {dispute.proposedWinner === 1 ? market.option1 : market.option2}</div>
+                            <div><strong>Bond:</strong> {dispute.bondAmount} ETH</div>
+                            <div className="flex gap-2 mt-2">
+                              <button
+                                onClick={() => resolveDispute(market.id, index, true)}
+                                className="bg-green-600 hover:bg-green-700 text-white px-2 py-1 rounded text-xs"
+                              >
+                                Accept Dispute
+                              </button>
+                              <button
+                                onClick={() => resolveDispute(market.id, index, false)}
+                                className="bg-red-600 hover:bg-red-700 text-white px-2 py-1 rounded text-xs"
+                              >
+                                Reject Dispute
+                              </button>
+                            </div>
+                          </div>
+                        ))}
+                      </div>
+                    )}
+                    
+                    {/* Claims Status */}
+                    {canClaimRewards(market) && (
+                      <div className="text-center p-2 bg-green-50 dark:bg-green-900/20 rounded">
+                        <span className="text-sm text-green-700 dark:text-green-300">
+                          ✓ Rewards can now be claimed
+                        </span>
+                      </div>
+                    )}
                   </div>
                 )}
                 
@@ -892,6 +1177,198 @@ export default function Home() {
                 className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg font-medium"
               >
                 Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Dispute Modal */}
+      {showDisputeModal && selectedDisputeMarket && currentUser && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
+              🔶 Dispute Market Result
+            </h3>
+            
+            <div className="mb-4 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+              <div className="text-sm">
+                <strong>Market:</strong> {selectedDisputeMarket.question}
+              </div>
+              <div className="text-sm mt-1">
+                <strong>Current Winner:</strong> {selectedDisputeMarket.winner === 1 ? selectedDisputeMarket.option1 : selectedDisputeMarket.option2}
+              </div>
+            </div>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  What should be the correct winner?
+                </label>
+                <div className="flex gap-2">
+                  <button
+                    onClick={() => setProposedWinner(1)}
+                    className={`flex-1 px-3 py-2 rounded text-sm ${
+                      proposedWinner === 1 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {selectedDisputeMarket.option1}
+                  </button>
+                  <button
+                    onClick={() => setProposedWinner(2)}
+                    className={`flex-1 px-3 py-2 rounded text-sm ${
+                      proposedWinner === 2 
+                        ? 'bg-blue-600 text-white' 
+                        : 'bg-gray-200 dark:bg-gray-600 text-gray-700 dark:text-gray-300'
+                    }`}
+                  >
+                    {selectedDisputeMarket.option2}
+                  </button>
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Dispute Bond (ETH) - Minimum 0.1 ETH
+                </label>
+                <input
+                  type="number"
+                  step="0.01"
+                  min="0.1"
+                  placeholder="0.1"
+                  value={disputeBond}
+                  onChange={(e) => setDisputeBond(e.target.value)}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+                <div className="text-xs text-gray-500 mt-1">
+                  Bond will be returned if dispute is valid, otherwise it will be slashed.
+                </div>
+              </div>
+              
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Reason for Dispute *
+                </label>
+                <textarea
+                  placeholder="Explain why you believe the current result is incorrect..."
+                  value={disputeReason}
+                  onChange={(e) => setDisputeReason(e.target.value)}
+                  rows={3}
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                />
+              </div>
+
+              {/* Balance Check */}
+              <div className="p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                <div className="text-sm">
+                  <div>Your Balance: {currentUser.balance.toFixed(3)} ETH</div>
+                  <div>Required Bond: {disputeBond} ETH</div>
+                  <div className={`font-medium ${
+                    parseFloat(disputeBond) <= currentUser.balance ? 'text-green-600' : 'text-red-600'
+                  }`}>
+                    {parseFloat(disputeBond) <= currentUser.balance ? '✓ Sufficient balance' : '✗ Insufficient balance'}
+                  </div>
+                </div>
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={handleDispute}
+                disabled={
+                  !disputeReason.trim() || 
+                  parseFloat(disputeBond) < 0.1 || 
+                  parseFloat(disputeBond) > currentUser.balance ||
+                  proposedWinner === selectedDisputeMarket.winner
+                }
+                className="flex-1 bg-orange-600 hover:bg-orange-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium"
+              >
+                Submit Dispute
+              </button>
+              <button
+                onClick={() => {
+                  setShowDisputeModal(false);
+                  setSelectedDisputeMarket(null);
+                  setDisputeReason('');
+                  setDisputeBond('0.1');
+                  setProposedWinner(1);
+                }}
+                className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* Admin Panel Modal */}
+      {showAdminPanel && currentUser?.isAdmin && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-2xl w-full max-h-[80vh] overflow-y-auto">
+            <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
+              🛡️ Admin Panel
+            </h3>
+            
+            <div className="space-y-4">
+              <h4 className="font-medium text-gray-900 dark:text-white">Pending Disputes</h4>
+              
+              {Object.entries(marketDisputes).length === 0 ? (
+                <div className="text-gray-500 text-center py-4">No disputes to review</div>
+              ) : (
+                Object.entries(marketDisputes).map(([marketId, disputes]) => {
+                  const market = markets.find(m => m.id === parseInt(marketId));
+                  const pendingDisputes = disputes.filter(d => !d.resolved);
+                  
+                  if (!market || pendingDisputes.length === 0) return null;
+                  
+                  return (
+                    <div key={marketId} className="border rounded-lg p-4">
+                      <h5 className="font-medium mb-2">{market.question}</h5>
+                      <div className="text-sm text-gray-600 mb-3">
+                        Current Winner: {market.winner === 1 ? market.option1 : market.option2}
+                      </div>
+                      
+                      {pendingDisputes.map((dispute, index) => (
+                        <div key={index} className="bg-yellow-50 dark:bg-yellow-900/20 p-3 rounded mb-2">
+                          <div className="text-sm space-y-1">
+                            <div><strong>Disputer:</strong> {dispute.disputer}</div>
+                            <div><strong>Proposed Winner:</strong> {dispute.proposedWinner === 1 ? market.option1 : market.option2}</div>
+                            <div><strong>Bond:</strong> {dispute.bondAmount} ETH</div>
+                            <div><strong>Reason:</strong> {dispute.reason}</div>
+                            <div><strong>Time:</strong> {new Date(dispute.disputeTime).toLocaleString()}</div>
+                          </div>
+                          
+                          <div className="flex gap-2 mt-3">
+                            <button
+                              onClick={() => resolveDispute(parseInt(marketId), disputes.indexOf(dispute), true)}
+                              className="bg-green-600 hover:bg-green-700 text-white px-3 py-1 rounded text-sm"
+                            >
+                              Accept (Return Bond)
+                            </button>
+                            <button
+                              onClick={() => resolveDispute(parseInt(marketId), disputes.indexOf(dispute), false)}
+                              className="bg-red-600 hover:bg-red-700 text-white px-3 py-1 rounded text-sm"
+                            >
+                              Reject (Slash Bond)
+                            </button>
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  );
+                })
+              )}
+            </div>
+            
+            <div className="flex justify-end mt-6">
+              <button
+                onClick={() => setShowAdminPanel(false)}
+                className="bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg font-medium"
+              >
+                Close
               </button>
             </div>
           </div>
