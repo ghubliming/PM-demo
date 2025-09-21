@@ -115,14 +115,99 @@ export default function Home() {
     }
   }, [markets]);
 
-  const calculateOdds = (market: Market) => {
-    if (market.totalStaked === 0) return { option1: 50, option2: 50 };
-    const option1Odds = Math.round((market.option1Stakes / market.totalStaked) * 100);
-    const option2Odds = Math.round((market.option2Stakes / market.totalStaked) * 100);
-    return { option1: option1Odds, option2: option2Odds };
+  // Enhanced Market Maker Algorithm using LMSR (Logarithmic Market Scoring Rule)
+  // This provides continuous liquidity and more accurate pricing similar to Polymarket
+  const calculateLMSRPrices = (market: Market) => {
+    // LMSR parameters - liquidity parameter controls market depth
+    const b = Math.max(10, market.totalStaked * 0.1); // Adaptive liquidity parameter
+    
+    // If no stakes, return neutral prices
+    if (market.totalStaked === 0) {
+      return {
+        option1Price: 0.50,
+        option2Price: 0.50,
+        option1Odds: 50,
+        option2Odds: 50,
+        spread: 0.02 // 2% spread
+      };
+    }
+
+    // Calculate LMSR prices
+    const q1 = market.option1Stakes;
+    const q2 = market.option2Stakes;
+    
+    // LMSR price formula: p_i = exp(q_i/b) / sum(exp(q_j/b))
+    const exp1 = Math.exp(q1 / b);
+    const exp2 = Math.exp(q2 / b);
+    const sum = exp1 + exp2;
+    
+    const option1Price = exp1 / sum;
+    const option2Price = exp2 / sum;
+    
+    // Calculate spread based on liquidity depth
+    const spreadFactor = Math.max(0.01, 1 / Math.sqrt(market.totalStaked + 1));
+    const spread = Math.min(0.1, spreadFactor * 2); // Cap spread at 10%
+    
+    return {
+      option1Price,
+      option2Price,
+      option1Odds: Math.round(option1Price * 100),
+      option2Odds: Math.round(option2Price * 100),
+      spread
+    };
   };
 
-  // Market Maker Liquidity Algorithm - balances bets when there's too much imbalance
+  // Calculate bid/ask prices with spread
+  const calculateBidAskPrices = (market: Market) => {
+    const { option1Price, option2Price, spread } = calculateLMSRPrices(market);
+    
+    return {
+      option1: {
+        bid: Math.max(0.01, option1Price - spread/2),
+        ask: Math.min(0.99, option1Price + spread/2),
+        mid: option1Price
+      },
+      option2: {
+        bid: Math.max(0.01, option2Price - spread/2),
+        ask: Math.min(0.99, option2Price + spread/2),
+        mid: option2Price
+      }
+    };
+  };
+
+  // Legacy odds calculation for backwards compatibility
+  const calculateOdds = (market: Market) => {
+    const prices = calculateLMSRPrices(market);
+    return { option1: prices.option1Odds, option2: prices.option2Odds };
+  };
+
+  // Calculate price impact for a given bet size
+  const calculatePriceImpact = (market: Market, betOption: number, betAmount: number) => {
+    const currentPrices = calculateLMSRPrices(market);
+    const currentPrice = betOption === 1 ? currentPrices.option1Price : currentPrices.option2Price;
+    
+    // Simulate the bet
+    const simulatedMarket = { ...market };
+    if (betOption === 1) {
+      simulatedMarket.option1Stakes += betAmount;
+    } else {
+      simulatedMarket.option2Stakes += betAmount;
+    }
+    simulatedMarket.totalStaked += betAmount;
+    
+    const newPrices = calculateLMSRPrices(simulatedMarket);
+    const newPrice = betOption === 1 ? newPrices.option1Price : newPrices.option2Price;
+    
+    const priceImpact = Math.abs(newPrice - currentPrice) / currentPrice;
+    return {
+      currentPrice,
+      newPrice,
+      priceImpact,
+      priceImpactPercent: priceImpact * 100
+    };
+  };
+
+  // Enhanced Market Maker with continuous liquidity provision
   const applyMarketMakerBalancing = (market: Market, betOption: number, betAmount: number) => {
     const newMarket = { ...market };
     
@@ -134,31 +219,53 @@ export default function Home() {
     }
     newMarket.totalStaked += betAmount;
 
-    // Calculate imbalance ratio
-    const totalStakes = newMarket.totalStaked;
-    const option1Ratio = newMarket.option1Stakes / totalStakes;
-    const option2Ratio = newMarket.option2Stakes / totalStakes;
+    // Enhanced market making: Add liquidity based on price impact and imbalance
+    const priceImpact = calculatePriceImpact(market, betOption, betAmount);
+    const prices = calculateLMSRPrices(newMarket);
     
-    // If imbalance is too high (> 80%), add liquidity to the other side
-    const maxImbalance = 0.8;
-    const minLiquidity = 0.1; // Minimum 10% on each side
-    
+    // Add counter-liquidity if price impact is high or market is imbalanced
     let liquidityAdded = 0;
-    if (option1Ratio > maxImbalance) {
-      // Too much on option 1, add liquidity to option 2
-      const targetOption2 = totalStakes * minLiquidity;
-      liquidityAdded = Math.max(0, targetOption2 - newMarket.option2Stakes);
-      newMarket.option2Stakes += liquidityAdded;
-      newMarket.totalStaked += liquidityAdded;
-    } else if (option2Ratio > maxImbalance) {
-      // Too much on option 2, add liquidity to option 1  
-      const targetOption1 = totalStakes * minLiquidity;
-      liquidityAdded = Math.max(0, targetOption1 - newMarket.option1Stakes);
-      newMarket.option1Stakes += liquidityAdded;
-      newMarket.totalStaked += liquidityAdded;
+    const highImpactThreshold = 0.05; // 5% price impact
+    const maxPrice = 0.85; // Maximum price before intervention
+    const minPrice = 0.15; // Minimum price before intervention
+    
+    const targetPrice = betOption === 1 ? prices.option1Price : prices.option2Price;
+    
+    if (priceImpact.priceImpact > highImpactThreshold || targetPrice > maxPrice || targetPrice < minPrice) {
+      // Add liquidity to the opposite side to moderate price movement
+      const counterOption = betOption === 1 ? 2 : 1;
+      const liquidityAmount = Math.min(betAmount * 0.3, 5); // Max 30% of bet or 5 ETH
+      
+      if (counterOption === 1) {
+        newMarket.option1Stakes += liquidityAmount;
+      } else {
+        newMarket.option2Stakes += liquidityAmount;
+      }
+      
+      newMarket.totalStaked += liquidityAmount;
+      liquidityAdded = liquidityAmount;
     }
 
-    return { market: newMarket, liquidityAdded };
+    // Ensure minimum liquidity on both sides
+    const minLiquidity = Math.max(1, newMarket.totalStaked * 0.05); // 5% minimum
+    if (newMarket.option1Stakes < minLiquidity) {
+      const needed = minLiquidity - newMarket.option1Stakes;
+      newMarket.option1Stakes += needed;
+      newMarket.totalStaked += needed;
+      liquidityAdded += needed;
+    }
+    if (newMarket.option2Stakes < minLiquidity) {
+      const needed = minLiquidity - newMarket.option2Stakes;
+      newMarket.option2Stakes += needed;
+      newMarket.totalStaked += needed;
+      liquidityAdded += needed;
+    }
+
+    return { 
+      market: newMarket, 
+      liquidityAdded,
+      priceImpact: priceImpact.priceImpactPercent
+    };
   };
 
   const createUser = (name: string): User => {
@@ -233,8 +340,27 @@ export default function Home() {
 
     if (!selectedMarket) return;
 
-    // Apply market maker balancing
-    const { market: updatedMarket, liquidityAdded } = applyMarketMakerBalancing(selectedMarket, selectedOption, amount);
+    // Calculate price impact before placing bet
+    const priceImpact = calculatePriceImpact(selectedMarket, selectedOption, amount);
+    
+    // Warn user about high price impact
+    if (priceImpact.priceImpactPercent > 5) {
+      const proceed = confirm(
+        `This bet will have a ${priceImpact.priceImpactPercent.toFixed(2)}% price impact.\n` +
+        `Price will move from ${(priceImpact.currentPrice * 100).toFixed(1)}¢ to ${(priceImpact.newPrice * 100).toFixed(1)}¢.\n` +
+        `Do you want to proceed?`
+      );
+      if (!proceed) return;
+    }
+
+    // Apply market maker balancing with enhanced algorithm
+    const { market: updatedMarket, liquidityAdded, priceImpact: finalPriceImpact } = applyMarketMakerBalancing(selectedMarket, selectedOption, amount);
+    
+    // Show market maker intervention if significant liquidity was added
+    if (liquidityAdded > 0.1) {
+      console.log(`Market maker added ${liquidityAdded.toFixed(3)} ETH in counter-liquidity`);
+      console.log(`Final price impact: ${finalPriceImpact.toFixed(2)}%`);
+    }
     
     // Update markets
     const newMarkets = markets.map(m => m.id === selectedMarket.id ? updatedMarket : m);
@@ -364,6 +490,8 @@ export default function Home() {
         <div className="grid gap-6">
           {markets.map((market) => {
             const odds = calculateOdds(market);
+            const lmsrPrices = calculateLMSRPrices(market);
+            const bidAskPrices = calculateBidAskPrices(market);
             const userPosition = getUserPosition(market.id);
             const hasPosition = userPosition.option1Amount > 0 || userPosition.option2Amount > 0;
             
@@ -376,6 +504,20 @@ export default function Home() {
                   <span className="text-sm text-gray-500 dark:text-gray-400">
                     {formatTimeLeft(market.endTime)}
                   </span>
+                </div>
+                
+                {/* Enhanced Market Info */}
+                <div className="mb-4 p-3 bg-gray-50 dark:bg-gray-700/50 rounded-lg">
+                  <div className="grid grid-cols-2 gap-4 text-xs text-gray-600 dark:text-gray-300">
+                    <div>
+                      <span className="font-medium">Market Depth:</span><br/>
+                      Liquidity: {(Math.max(10, market.totalStaked * 0.1)).toFixed(1)} ETH
+                    </div>
+                    <div>
+                      <span className="font-medium">Spread:</span><br/>
+                      {(lmsrPrices.spread * 100).toFixed(2)}%
+                    </div>
+                  </div>
                 </div>
                 
                 {/* User Position Display */}
@@ -404,9 +546,18 @@ export default function Home() {
                        onClick={() => currentUser && setSelectedMarket(market)}>
                     <div className="flex justify-between items-center mb-2">
                       <span className="font-medium text-green-600">{market.option1}</span>
-                      <span className="text-sm text-gray-500">{odds.option1}%</span>
+                      <div className="text-right">
+                        <div className="text-sm text-gray-500">{odds.option1}%</div>
+                        <div className="text-xs text-gray-400">
+                          {(bidAskPrices.option1.mid * 100).toFixed(1)}¢
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>Bid: {(bidAskPrices.option1.bid * 100).toFixed(1)}¢</span>
+                      <span>Ask: {(bidAskPrices.option1.ask * 100).toFixed(1)}¢</span>
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                       Staked: {market.option1Stakes.toFixed(3)} ETH
                     </div>
                   </div>
@@ -415,9 +566,18 @@ export default function Home() {
                        onClick={() => currentUser && setSelectedMarket(market)}>
                     <div className="flex justify-between items-center mb-2">
                       <span className="font-medium text-red-600">{market.option2}</span>
-                      <span className="text-sm text-gray-500">{odds.option2}%</span>
+                      <div className="text-right">
+                        <div className="text-sm text-gray-500">{odds.option2}%</div>
+                        <div className="text-xs text-gray-400">
+                          {(bidAskPrices.option2.mid * 100).toFixed(1)}¢
+                        </div>
+                      </div>
                     </div>
-                    <div className="text-sm text-gray-600 dark:text-gray-400">
+                    <div className="flex justify-between text-xs text-gray-500">
+                      <span>Bid: {(bidAskPrices.option2.bid * 100).toFixed(1)}¢</span>
+                      <span>Ask: {(bidAskPrices.option2.ask * 100).toFixed(1)}¢</span>
+                    </div>
+                    <div className="text-sm text-gray-600 dark:text-gray-400 mt-2">
                       Staked: {market.option2Stakes.toFixed(3)} ETH
                     </div>
                   </div>
@@ -540,26 +700,51 @@ export default function Home() {
                   Choose Option
                 </label>
                 <div className="grid grid-cols-1 gap-2">
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      value={1}
-                      checked={selectedOption === 1}
-                      onChange={(e) => setSelectedOption(parseInt(e.target.value))}
-                      className="mr-2"
-                    />
-                    <span className="text-green-600">{selectedMarket.option1}</span>
-                  </label>
-                  <label className="flex items-center">
-                    <input
-                      type="radio"
-                      value={2}
-                      checked={selectedOption === 2}
-                      onChange={(e) => setSelectedOption(parseInt(e.target.value))}
-                      className="mr-2"
-                    />
-                    <span className="text-red-600">{selectedMarket.option2}</span>
-                  </label>
+                  {(() => {
+                    const prices = calculateLMSRPrices(selectedMarket);
+                    const bidAsk = calculateBidAskPrices(selectedMarket);
+                    
+                    return (
+                      <>
+                        <label className="flex items-center justify-between p-3 border rounded-lg">
+                          <div className="flex items-center">
+                            <input
+                              type="radio"
+                              value={1}
+                              checked={selectedOption === 1}
+                              onChange={(e) => setSelectedOption(parseInt(e.target.value))}
+                              className="mr-3"
+                            />
+                            <span className="text-green-600 font-medium">{selectedMarket.option1}</span>
+                          </div>
+                          <div className="text-right text-sm">
+                            <div className="font-medium">{prices.option1Odds}%</div>
+                            <div className="text-xs text-gray-500">
+                              {(bidAsk.option1.mid * 100).toFixed(1)}¢
+                            </div>
+                          </div>
+                        </label>
+                        <label className="flex items-center justify-between p-3 border rounded-lg">
+                          <div className="flex items-center">
+                            <input
+                              type="radio"
+                              value={2}
+                              checked={selectedOption === 2}
+                              onChange={(e) => setSelectedOption(parseInt(e.target.value))}
+                              className="mr-3"
+                            />
+                            <span className="text-red-600 font-medium">{selectedMarket.option2}</span>
+                          </div>
+                          <div className="text-right text-sm">
+                            <div className="font-medium">{prices.option2Odds}%</div>
+                            <div className="text-xs text-gray-500">
+                              {(bidAsk.option2.mid * 100).toFixed(1)}¢
+                            </div>
+                          </div>
+                        </label>
+                      </>
+                    );
+                  })()}
                 </div>
               </div>
               
@@ -579,6 +764,37 @@ export default function Home() {
                 <div className="text-xs text-gray-500 mt-1">
                   Max: {currentUser.balance.toFixed(3)} ETH
                 </div>
+                
+                {/* Price Impact Display */}
+                {betAmount && parseFloat(betAmount) > 0 && (
+                  <div className="mt-3 p-3 bg-yellow-50 dark:bg-yellow-900/20 rounded-lg">
+                    {(() => {
+                      const amount = parseFloat(betAmount);
+                      const impact = calculatePriceImpact(selectedMarket, selectedOption, amount);
+                      const isHighImpact = impact.priceImpactPercent > 5;
+                      
+                      return (
+                        <div className="text-sm">
+                          <div className="font-medium text-yellow-800 dark:text-yellow-200 mb-2">
+                            Price Impact Analysis
+                          </div>
+                          <div className="space-y-1 text-yellow-700 dark:text-yellow-300">
+                            <div>Current Price: {(impact.currentPrice * 100).toFixed(1)}¢</div>
+                            <div>New Price: {(impact.newPrice * 100).toFixed(1)}¢</div>
+                            <div className={isHighImpact ? 'text-red-600 font-medium' : ''}>
+                              Price Impact: {impact.priceImpactPercent.toFixed(2)}%
+                            </div>
+                            {isHighImpact && (
+                              <div className="text-xs text-red-600 mt-2">
+                                ⚠️ High price impact! Consider splitting into smaller orders.
+                              </div>
+                            )}
+                          </div>
+                        </div>
+                      );
+                    })()}
+                  </div>
+                )}
               </div>
             </div>
             

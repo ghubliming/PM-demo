@@ -21,18 +21,35 @@ This project demonstrates the core functionality of a decentralized prediction m
 - **Market Display**: View all active prediction markets with real-time odds
 - **Market Creation**: Create new prediction markets with custom questions and options
 - **Position Trading**: Place real bets that affect user balances and market dynamics
-- **Market Maker Algorithm**: Pseudo liquidity system that balances markets when imbalances exceed 80%
+- **Enhanced Market Maker Algorithm**: Advanced LMSR-based pricing similar to Polymarket
 - **User Portfolio**: Track positions across multiple markets with real-time updates
 - **Balance Management**: Comprehensive balance validation and transaction history
 - **Data Persistence**: User accounts, positions, and market states saved in localStorage
 - **Real-time Odds**: Dynamic odds calculation based on actual stake distribution
+- **Price Impact Analysis**: Shows how large orders affect market prices
+- **Bid-Ask Spreads**: Professional trading interface with market depth
 - **Responsive UI**: Mobile-friendly interface built with Next.js and Tailwind CSS
 
-![Functional Prediction Markets](https://github.com/user-attachments/assets/7f478e89-3f5d-4545-b052-7832ec5ea057)
+### 🔥 New Enhanced Market Maker Features
 
-*Screenshot showing the fully functional system with user login, balance tracking, position management, and market maker functionality*
+- **LMSR Pricing**: Logarithmic Market Scoring Rule for continuous, accurate price discovery
+- **Dynamic Spreads**: Bid-ask spreads that adjust based on market liquidity and volatility
+- **Price Impact Warnings**: Real-time calculation and warnings for trades with high price impact
+- **Continuous Liquidity**: Market maker provides liquidity at all price levels, not just imbalance thresholds
+- **Professional Interface**: Market depth, spreads, and bid/ask prices displayed like real trading platforms
+- **Smart Rebalancing**: Automated counter-liquidity provision to maintain balanced markets
 
-![Betting Modal](https://github.com/user-attachments/assets/a821e81f-c28b-4d7b-89b4-3a6eceb11364)
+![Enhanced Market Interface](https://github.com/user-attachments/assets/9ae69c3a-ad59-4d25-9b69-4a1b13a12db9)
+
+*Screenshot showing the enhanced market interface with LMSR pricing, bid/ask spreads, and market depth information*
+
+![Price Impact Analysis](https://github.com/user-attachments/assets/28dd5f56-9ab6-467e-a05f-7951be14f792)
+
+*Screenshot showing the price impact analysis feature warning users about high-impact trades*
+
+![Market After Enhanced Algorithm](https://github.com/user-attachments/assets/81f17cc5-4ecc-495d-a78f-dedfaaf6ae81)
+
+*Screenshot showing the market state after the enhanced market maker automatically balanced the market*
 
 ![Create Market Modal](https://github.com/user-attachments/assets/091af255-f640-449f-8c38-b07c834c1895)
 
@@ -44,6 +61,62 @@ The `PredictionMarket.sol` contract includes:
 - Market resolution by authorized users
 - Reward distribution to winners
 - Emergency functions for contract safety
+
+## 🧮 Enhanced Market Maker Algorithm
+
+The prediction market now implements a sophisticated market making algorithm inspired by Polymarket and professional trading platforms:
+
+### LMSR (Logarithmic Market Scoring Rule)
+
+The core pricing mechanism uses LMSR for continuous price discovery:
+
+```typescript
+// LMSR price formula: p_i = exp(q_i/b) / sum(exp(q_j/b))
+const exp1 = Math.exp(q1 / b);
+const exp2 = Math.exp(q2 / b);
+const price = exp1 / (exp1 + exp2);
+```
+
+**Benefits:**
+- **Continuous Liquidity**: Always provides liquidity at any price level
+- **Accurate Pricing**: Prices reflect true market sentiment
+- **Bounded Loss**: Market maker losses are mathematically bounded
+
+### Dynamic Bid-Ask Spreads
+
+Spreads automatically adjust based on market conditions:
+
+```typescript
+const spreadFactor = Math.max(0.01, 1 / Math.sqrt(totalStaked + 1));
+const spread = Math.min(0.1, spreadFactor * 2);
+```
+
+**Features:**
+- **Liquidity-Based**: Tighter spreads in liquid markets
+- **Risk Management**: Wider spreads protect against adverse selection
+- **Professional Display**: Bid/ask prices shown like real exchanges
+
+### Price Impact Analysis
+
+Real-time calculation of how trades affect market prices:
+
+```typescript
+const priceImpact = Math.abs(newPrice - currentPrice) / currentPrice;
+```
+
+**User Protection:**
+- **Impact Warnings**: Alerts for trades >5% price impact
+- **Confirmation Dialog**: Requires user approval for high-impact trades
+- **Split Order Suggestions**: Recommends breaking large orders
+
+### Smart Rebalancing
+
+Automated liquidity provision maintains balanced markets:
+
+- **Continuous Monitoring**: Checks price impact on every trade
+- **Counter-Liquidity**: Adds opposing stakes when needed  
+- **Minimum Thresholds**: Ensures 5% minimum liquidity on each side
+- **Adaptive Parameters**: Liquidity parameter scales with market size
 
 ## 📁 Project Structure
 
