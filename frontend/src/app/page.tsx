@@ -466,7 +466,7 @@ export default function Home() {
     setMarketDisputes(updatedDisputes);
 
     // Update market
-    let updatedMarkets = markets.map(m => {
+    const updatedMarkets = markets.map(m => {
       if (m.id === marketId) {
         const updatedMarket = { ...m, disputed: false };
         if (isValid) {
