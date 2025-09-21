@@ -15,12 +15,29 @@ interface Market {
   winner: number;
 }
 
+interface User {
+  id: string;
+  name: string;
+  balance: number;
+  positions: { [marketId: number]: { option1Amount: number; option2Amount: number } };
+}
+
+interface UserBet {
+  marketId: number;
+  option: number;
+  amount: number;
+  timestamp: number;
+}
+
 export default function Home() {
   const [markets, setMarkets] = useState<Market[]>([]);
   const [selectedMarket, setSelectedMarket] = useState<Market | null>(null);
   const [betAmount, setBetAmount] = useState('');
   const [selectedOption, setSelectedOption] = useState<number>(1);
   const [showCreateMarket, setShowCreateMarket] = useState(false);
+  const [currentUser, setCurrentUser] = useState<User | null>(null);
+  const [showUserLogin, setShowUserLogin] = useState(false);
+  const [userBets, setUserBets] = useState<UserBet[]>([]);
   const [newMarket, setNewMarket] = useState({
     question: '',
     option1: '',
@@ -28,8 +45,20 @@ export default function Home() {
     duration: '24'
   });
 
-  // Mock data for demo
+  // Initialize user system and mock data
   useEffect(() => {
+    // Load saved user from localStorage
+    const savedUser = localStorage.getItem('predictionMarketUser');
+    if (savedUser) {
+      setCurrentUser(JSON.parse(savedUser));
+    }
+
+    // Load saved bets from localStorage  
+    const savedBets = localStorage.getItem('userBets');
+    if (savedBets) {
+      setUserBets(JSON.parse(savedBets));
+    }
+
     const mockMarkets: Market[] = [
       {
         id: 0,
@@ -56,14 +85,120 @@ export default function Home() {
         winner: 0
       }
     ];
-    setMarkets(mockMarkets);
+    
+    // Load saved markets or use defaults
+    const savedMarkets = localStorage.getItem('predictionMarkets');
+    if (savedMarkets) {
+      setMarkets(JSON.parse(savedMarkets));
+    } else {
+      setMarkets(mockMarkets);
+      localStorage.setItem('predictionMarkets', JSON.stringify(mockMarkets));
+    }
   }, []);
+
+  // Save user data whenever currentUser changes
+  useEffect(() => {
+    if (currentUser) {
+      localStorage.setItem('predictionMarketUser', JSON.stringify(currentUser));
+    }
+  }, [currentUser]);
+
+  // Save bets whenever userBets changes
+  useEffect(() => {
+    localStorage.setItem('userBets', JSON.stringify(userBets));
+  }, [userBets]);
+
+  // Save markets whenever they change
+  useEffect(() => {
+    if (markets.length > 0) {
+      localStorage.setItem('predictionMarkets', JSON.stringify(markets));
+    }
+  }, [markets]);
 
   const calculateOdds = (market: Market) => {
     if (market.totalStaked === 0) return { option1: 50, option2: 50 };
     const option1Odds = Math.round((market.option1Stakes / market.totalStaked) * 100);
     const option2Odds = Math.round((market.option2Stakes / market.totalStaked) * 100);
     return { option1: option1Odds, option2: option2Odds };
+  };
+
+  // Market Maker Liquidity Algorithm - balances bets when there's too much imbalance
+  const applyMarketMakerBalancing = (market: Market, betOption: number, betAmount: number) => {
+    const newMarket = { ...market };
+    
+    // Add the user's bet first
+    if (betOption === 1) {
+      newMarket.option1Stakes += betAmount;
+    } else {
+      newMarket.option2Stakes += betAmount;
+    }
+    newMarket.totalStaked += betAmount;
+
+    // Calculate imbalance ratio
+    const totalStakes = newMarket.totalStaked;
+    const option1Ratio = newMarket.option1Stakes / totalStakes;
+    const option2Ratio = newMarket.option2Stakes / totalStakes;
+    
+    // If imbalance is too high (> 80%), add liquidity to the other side
+    const maxImbalance = 0.8;
+    const minLiquidity = 0.1; // Minimum 10% on each side
+    
+    let liquidityAdded = 0;
+    if (option1Ratio > maxImbalance) {
+      // Too much on option 1, add liquidity to option 2
+      const targetOption2 = totalStakes * minLiquidity;
+      liquidityAdded = Math.max(0, targetOption2 - newMarket.option2Stakes);
+      newMarket.option2Stakes += liquidityAdded;
+      newMarket.totalStaked += liquidityAdded;
+    } else if (option2Ratio > maxImbalance) {
+      // Too much on option 2, add liquidity to option 1  
+      const targetOption1 = totalStakes * minLiquidity;
+      liquidityAdded = Math.max(0, targetOption1 - newMarket.option1Stakes);
+      newMarket.option1Stakes += liquidityAdded;
+      newMarket.totalStaked += liquidityAdded;
+    }
+
+    return { market: newMarket, liquidityAdded };
+  };
+
+  const createUser = (name: string): User => {
+    const newUser: User = {
+      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
+      name: name.trim(),
+      balance: 100, // Starting balance of 100 ETH
+      positions: {}
+    };
+    return newUser;
+  };
+
+  const loginUser = (name: string) => {
+    if (!name.trim()) return;
+    
+    // Try to load existing user from localStorage
+    const existingUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+    let user = existingUsers.find((u: User) => u.name.toLowerCase() === name.toLowerCase());
+    
+    if (!user) {
+      // Create new user
+      user = createUser(name);
+      existingUsers.push(user);
+      localStorage.setItem('allUsers', JSON.stringify(existingUsers));
+    }
+    
+    setCurrentUser(user);
+    setShowUserLogin(false);
+  };
+
+  const logoutUser = () => {
+    setCurrentUser(null);
+    localStorage.removeItem('predictionMarketUser');
+  };
+
+  const getUserPosition = (marketId: number) => {
+    if (!currentUser || !currentUser.positions[marketId]) {
+      return { option1Amount: 0, option2Amount: 0 };
+    }
+    return currentUser.positions[marketId];
   };
 
   const formatTimeLeft = (endTime: number) => {
@@ -80,14 +215,85 @@ export default function Home() {
   };
 
   const handlePlaceBet = () => {
-    // This would interact with the smart contract in a real implementation
-    alert(`Demo: Would place bet of ${betAmount} ETH on option ${selectedOption} for market "${selectedMarket?.question}"`);
+    if (!currentUser) {
+      alert('Please login first to place bets!');
+      return;
+    }
+
+    const amount = parseFloat(betAmount);
+    if (!amount || amount <= 0) {
+      alert('Please enter a valid bet amount!');
+      return;
+    }
+
+    if (amount > currentUser.balance) {
+      alert('Insufficient balance! You only have ' + currentUser.balance.toFixed(3) + ' ETH');
+      return;
+    }
+
+    if (!selectedMarket) return;
+
+    // Apply market maker balancing
+    const { market: updatedMarket, liquidityAdded } = applyMarketMakerBalancing(selectedMarket, selectedOption, amount);
+    
+    // Update markets
+    const newMarkets = markets.map(m => m.id === selectedMarket.id ? updatedMarket : m);
+    setMarkets(newMarkets);
+
+    // Update user balance and position
+    const updatedUser = { ...currentUser };
+    updatedUser.balance -= amount;
+    
+    if (!updatedUser.positions[selectedMarket.id]) {
+      updatedUser.positions[selectedMarket.id] = { option1Amount: 0, option2Amount: 0 };
+    }
+    
+    if (selectedOption === 1) {
+      updatedUser.positions[selectedMarket.id].option1Amount += amount;
+    } else {
+      updatedUser.positions[selectedMarket.id].option2Amount += amount;
+    }
+    
+    setCurrentUser(updatedUser);
+    
+    // Save user bet history
+    const newBet: UserBet = {
+      marketId: selectedMarket.id,
+      option: selectedOption,
+      amount: amount,
+      timestamp: Date.now()
+    };
+    setUserBets([...userBets, newBet]);
+
+    // Update all users in localStorage
+    const existingUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
+    const userIndex = existingUsers.findIndex((u: User) => u.id === updatedUser.id);
+    if (userIndex !== -1) {
+      existingUsers[userIndex] = updatedUser;
+      localStorage.setItem('allUsers', JSON.stringify(existingUsers));
+    }
+
+    let message = `Bet placed successfully! ${amount} ETH on "${selectedOption === 1 ? selectedMarket.option1 : selectedMarket.option2}"`;
+    if (liquidityAdded > 0) {
+      message += `\n\nMarket Maker added ${liquidityAdded.toFixed(3)} ETH liquidity to balance the market.`;
+    }
+    
+    alert(message);
     setSelectedMarket(null);
     setBetAmount('');
   };
 
   const handleCreateMarket = () => {
-    // This would create a new market on the smart contract
+    if (!currentUser) {
+      alert('Please login first to create markets!');
+      return;
+    }
+
+    if (!newMarket.question || !newMarket.option1 || !newMarket.option2) {
+      alert('Please fill in all fields!');
+      return;
+    }
+
     const newMarketData: Market = {
       id: markets.length,
       question: newMarket.question,
@@ -104,7 +310,7 @@ export default function Home() {
     setMarkets([...markets, newMarketData]);
     setShowCreateMarket(false);
     setNewMarket({ question: '', option1: '', option2: '', duration: '24' });
-    alert(`Demo: Market "${newMarket.question}" created successfully!`);
+    alert(`Market "${newMarket.question}" created successfully!`);
   };
 
   return (
@@ -116,12 +322,39 @@ export default function Home() {
             <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
               🎯 PM Demo - Prediction Markets
             </h1>
-            <button
-              onClick={() => setShowCreateMarket(true)}
-              className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
-            >
-              Create Market
-            </button>
+            <div className="flex items-center gap-4">
+              {currentUser ? (
+                <>
+                  <div className="text-right">
+                    <div className="text-sm font-medium text-gray-900 dark:text-white">
+                      Welcome, {currentUser.name}
+                    </div>
+                    <div className="text-sm text-green-600 dark:text-green-400 font-bold">
+                      Balance: {currentUser.balance.toFixed(3)} ETH
+                    </div>
+                  </div>
+                  <button
+                    onClick={() => setShowCreateMarket(true)}
+                    className="bg-blue-600 hover:bg-blue-700 text-white px-4 py-2 rounded-lg font-medium"
+                  >
+                    Create Market
+                  </button>
+                  <button
+                    onClick={logoutUser}
+                    className="bg-red-600 hover:bg-red-700 text-white px-4 py-2 rounded-lg font-medium"
+                  >
+                    Logout
+                  </button>
+                </>
+              ) : (
+                <button
+                  onClick={() => setShowUserLogin(true)}
+                  className="bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium"
+                >
+                  Login / Sign Up
+                </button>
+              )}
+            </div>
           </div>
         </div>
       </header>
@@ -131,6 +364,9 @@ export default function Home() {
         <div className="grid gap-6">
           {markets.map((market) => {
             const odds = calculateOdds(market);
+            const userPosition = getUserPosition(market.id);
+            const hasPosition = userPosition.option1Amount > 0 || userPosition.option2Amount > 0;
+            
             return (
               <div key={market.id} className="bg-white dark:bg-gray-800 rounded-lg shadow-md p-6">
                 <div className="flex justify-between items-start mb-4">
@@ -142,32 +378,59 @@ export default function Home() {
                   </span>
                 </div>
                 
+                {/* User Position Display */}
+                {currentUser && hasPosition && (
+                  <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                    <div className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">
+                      Your Position:
+                    </div>
+                    <div className="flex gap-4 text-sm">
+                      {userPosition.option1Amount > 0 && (
+                        <span className="text-green-600 dark:text-green-400">
+                          Option 1: {userPosition.option1Amount.toFixed(3)} ETH
+                        </span>
+                      )}
+                      {userPosition.option2Amount > 0 && (
+                        <span className="text-red-600 dark:text-red-400">
+                          Option 2: {userPosition.option2Amount.toFixed(3)} ETH
+                        </span>
+                      )}
+                    </div>
+                  </div>
+                )}
+                
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-4 mb-4">
-                  <div className="border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
-                       onClick={() => setSelectedMarket(market)}>
+                  <div className={`border rounded-lg p-4 ${currentUser ? 'hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                       onClick={() => currentUser && setSelectedMarket(market)}>
                     <div className="flex justify-between items-center mb-2">
                       <span className="font-medium text-green-600">{market.option1}</span>
                       <span className="text-sm text-gray-500">{odds.option1}%</span>
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">
-                      Staked: {market.option1Stakes} ETH
+                      Staked: {market.option1Stakes.toFixed(3)} ETH
                     </div>
                   </div>
                   
-                  <div className="border rounded-lg p-4 hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer"
-                       onClick={() => setSelectedMarket(market)}>
+                  <div className={`border rounded-lg p-4 ${currentUser ? 'hover:bg-gray-50 dark:hover:bg-gray-700 cursor-pointer' : 'opacity-50 cursor-not-allowed'}`}
+                       onClick={() => currentUser && setSelectedMarket(market)}>
                     <div className="flex justify-between items-center mb-2">
                       <span className="font-medium text-red-600">{market.option2}</span>
                       <span className="text-sm text-gray-500">{odds.option2}%</span>
                     </div>
                     <div className="text-sm text-gray-600 dark:text-gray-400">
-                      Staked: {market.option2Stakes} ETH
+                      Staked: {market.option2Stakes.toFixed(3)} ETH
                     </div>
                   </div>
                 </div>
                 
+                {!currentUser && (
+                  <div className="text-center py-2 text-sm text-gray-500 dark:text-gray-400">
+                    Login to place bets on this market
+                  </div>
+                )}
+                
                 <div className="flex justify-between items-center text-sm text-gray-500 dark:text-gray-400">
-                  <span>Total Volume: {market.totalStaked} ETH</span>
+                  <span>Total Volume: {market.totalStaked.toFixed(3)} ETH</span>
                   <span>Market ID: #{market.id}</span>
                 </div>
               </div>
@@ -176,8 +439,60 @@ export default function Home() {
         </div>
       </main>
 
+      {/* User Login Modal */}
+      {showUserLogin && (
+        <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
+          <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
+            <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
+              Login / Sign Up
+            </h3>
+            <p className="text-gray-600 dark:text-gray-300 mb-4">
+              Enter your username to login or create a new account. New users start with 100 ETH!
+            </p>
+            
+            <div className="space-y-4">
+              <div>
+                <label className="block text-sm font-medium text-gray-700 dark:text-gray-300 mb-2">
+                  Username
+                </label>
+                <input
+                  type="text"
+                  placeholder="Enter your username..."
+                  id="username-input"
+                  className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
+                  onKeyPress={(e) => {
+                    if (e.key === 'Enter') {
+                      const input = e.target as HTMLInputElement;
+                      loginUser(input.value);
+                    }
+                  }}
+                />
+              </div>
+            </div>
+            
+            <div className="flex gap-3 mt-6">
+              <button
+                onClick={() => {
+                  const input = document.getElementById('username-input') as HTMLInputElement;
+                  loginUser(input.value);
+                }}
+                className="flex-1 bg-green-600 hover:bg-green-700 text-white px-4 py-2 rounded-lg font-medium"
+              >
+                Login / Sign Up
+              </button>
+              <button
+                onClick={() => setShowUserLogin(false)}
+                className="flex-1 bg-gray-300 hover:bg-gray-400 text-gray-700 px-4 py-2 rounded-lg font-medium"
+              >
+                Cancel
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
       {/* Betting Modal */}
-      {selectedMarket && (
+      {selectedMarket && currentUser && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
             <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
@@ -186,6 +501,38 @@ export default function Home() {
             <p className="text-gray-600 dark:text-gray-300 mb-4">
               {selectedMarket.question}
             </p>
+            
+            {/* Balance Display */}
+            <div className="mb-4 p-3 bg-green-50 dark:bg-green-900/20 rounded-lg">
+              <div className="text-sm font-medium text-green-800 dark:text-green-200">
+                Your Balance: {currentUser.balance.toFixed(3)} ETH
+              </div>
+            </div>
+            
+            {/* Current Position */}
+            {(() => {
+              const position = getUserPosition(selectedMarket.id);
+              const hasPosition = position.option1Amount > 0 || position.option2Amount > 0;
+              return hasPosition ? (
+                <div className="mb-4 p-3 bg-blue-50 dark:bg-blue-900/20 rounded-lg">
+                  <div className="text-sm font-medium text-blue-800 dark:text-blue-200 mb-2">
+                    Current Position:
+                  </div>
+                  <div className="text-sm">
+                    {position.option1Amount > 0 && (
+                      <div className="text-green-600 dark:text-green-400">
+                        Option 1: {position.option1Amount.toFixed(3)} ETH
+                      </div>
+                    )}
+                    {position.option2Amount > 0 && (
+                      <div className="text-red-600 dark:text-red-400">
+                        Option 2: {position.option2Amount.toFixed(3)} ETH
+                      </div>
+                    )}
+                  </div>
+                </div>
+              ) : null;
+            })()}
             
             <div className="space-y-4">
               <div>
@@ -224,17 +571,21 @@ export default function Home() {
                   type="number"
                   step="0.001"
                   placeholder="0.1"
+                  max={currentUser.balance}
                   value={betAmount}
                   onChange={(e) => setBetAmount(e.target.value)}
                   className="w-full px-3 py-2 border border-gray-300 rounded-md focus:outline-none focus:ring-2 focus:ring-blue-500 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                 />
+                <div className="text-xs text-gray-500 mt-1">
+                  Max: {currentUser.balance.toFixed(3)} ETH
+                </div>
               </div>
             </div>
             
             <div className="flex gap-3 mt-6">
               <button
                 onClick={handlePlaceBet}
-                disabled={!betAmount || parseFloat(betAmount) <= 0}
+                disabled={!betAmount || parseFloat(betAmount) <= 0 || parseFloat(betAmount) > currentUser.balance}
                 className="flex-1 bg-blue-600 hover:bg-blue-700 disabled:bg-gray-400 text-white px-4 py-2 rounded-lg font-medium"
               >
                 Place Bet
@@ -251,7 +602,7 @@ export default function Home() {
       )}
 
       {/* Create Market Modal */}
-      {showCreateMarket && (
+      {showCreateMarket && currentUser && (
         <div className="fixed inset-0 bg-black bg-opacity-50 flex items-center justify-center p-4 z-50">
           <div className="bg-white dark:bg-gray-800 rounded-lg p-6 max-w-md w-full">
             <h3 className="text-lg font-semibold mb-4 text-gray-900 dark:text-white">
