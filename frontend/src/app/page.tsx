@@ -1,30 +1,8 @@
 'use client';
 
 import { useState, useEffect } from 'react';
-
-interface Market {
-  id: number;
-  question: string;
-  option1: string;
-  option2: string;
-  endTime: number;
-  totalStaked: number;
-  option1Stakes: number;
-  option2Stakes: number;
-  resolved: boolean;
-  winner: number;
-  resolutionTime?: number;
-  disputed?: boolean;
-  disputeEndTime?: number;
-}
-
-interface User {
-  id: string;
-  name: string;
-  balance: number;
-  positions: { [marketId: number]: { option1Amount: number; option2Amount: number } };
-  isAdmin?: boolean;
-}
+import { storageService } from '@/lib/storage';
+import { User, Market, UserBet } from '@/lib/adapters';
 
 interface Dispute {
   marketId: number;
@@ -35,13 +13,6 @@ interface Dispute {
   resolved: boolean;
   disputeValid: boolean;
   reason: string;
-}
-
-interface UserBet {
-  marketId: number;
-  option: number;
-  amount: number;
-  timestamp: number;
 }
 
 export default function Home() {
@@ -68,77 +39,48 @@ export default function Home() {
   const [proposedWinner, setProposedWinner] = useState<number>(1);
   const [showAdminPanel, setShowAdminPanel] = useState(false);
   const [marketDisputes, setMarketDisputes] = useState<{[marketId: number]: Dispute[]}>({});
+  
+  // Loading states for online functionality
+  const [isLoading, setIsLoading] = useState(true);
+  const [isOnlineMode, setIsOnlineMode] = useState(false);
 
-  // Initialize user system and mock data
+  // Initialize application data
   useEffect(() => {
-    // Load saved user from localStorage
-    const savedUser = localStorage.getItem('predictionMarketUser');
-    if (savedUser) {
-      setCurrentUser(JSON.parse(savedUser));
-    }
+    const initializeApp = async () => {
+      try {
+        setIsLoading(true);
+        setIsOnlineMode(storageService.isOnline());
+        
+        // Load saved user from localStorage (for quick restoration)
+        const savedUser = localStorage.getItem('predictionMarketUser');
+        if (savedUser) {
+          setCurrentUser(JSON.parse(savedUser));
+        }
 
-    // Load saved bets from localStorage  
-    const savedBets = localStorage.getItem('userBets');
-    if (savedBets) {
-      setUserBets(JSON.parse(savedBets));
-    }
-
-    const mockMarkets: Market[] = [
-      {
-        id: 0,
-        question: "Will Bitcoin reach $100,000 by end of 2024?",
-        option1: "Yes, Bitcoin will reach $100k",
-        option2: "No, Bitcoin won't reach $100k",
-        endTime: Date.now() + 24 * 60 * 60 * 1000, // 24 hours from now
-        totalStaked: 5.5,
-        option1Stakes: 3.2,
-        option2Stakes: 2.3,
-        resolved: false,
-        winner: 0
-      },
-      {
-        id: 1,
-        question: "Will Ethereum price be above $4000 next week?",
-        option1: "Yes, ETH > $4000",
-        option2: "No, ETH <= $4000",
-        endTime: Date.now() + 7 * 24 * 60 * 60 * 1000, // 7 days from now
-        totalStaked: 2.8,
-        option1Stakes: 1.1,
-        option2Stakes: 1.7,
-        resolved: false,
-        winner: 0
-      },
-      {
-        id: 2,
-        question: "Will Apple stock close above $200 this week?",
-        option1: "Yes, AAPL > $200",
-        option2: "No, AAPL <= $200",
-        endTime: Date.now() - 2 * 60 * 60 * 1000, // Ended 2 hours ago
-        totalStaked: 4.0,
-        option1Stakes: 1.5,
-        option2Stakes: 2.5,
-        resolved: true,
-        winner: 1,
-        resolutionTime: Date.now() - 60 * 60 * 1000, // Resolved 1 hour ago
-        disputed: false,
-        disputeEndTime: Date.now() + 23 * 60 * 60 * 1000 // 23 hours left for disputes
+        // Load saved bets from localStorage  
+        const savedBets = localStorage.getItem('userBets');
+        if (savedBets) {
+          setUserBets(JSON.parse(savedBets));
+        }
+        
+        // Load markets from storage service (online or offline)
+        const markets = await storageService.getMarkets();
+        setMarkets(markets);
+        
+        // Initialize mock disputes for demo
+        const mockDisputes: {[marketId: number]: Dispute[]} = {
+          2: [] // No disputes for resolved market yet
+        };
+        setMarketDisputes(mockDisputes);
+        
+      } catch (error) {
+        console.error('Error initializing app:', error);
+      } finally {
+        setIsLoading(false);
       }
-    ];
-    
-    // Initialize mock disputes
-    const mockDisputes: {[marketId: number]: Dispute[]} = {
-      2: [] // No disputes for resolved market yet
     };
-    setMarketDisputes(mockDisputes);
-    
-    // Load saved markets or use defaults
-    const savedMarkets = localStorage.getItem('predictionMarkets');
-    if (savedMarkets) {
-      setMarkets(JSON.parse(savedMarkets));
-    } else {
-      setMarkets(mockMarkets);
-      localStorage.setItem('predictionMarkets', JSON.stringify(mockMarkets));
-    }
+
+    initializeApp();
   }, []);
 
   // Save user data whenever currentUser changes
@@ -148,14 +90,14 @@ export default function Home() {
     }
   }, [currentUser]);
 
-  // Save bets whenever userBets changes
+  // Save bets whenever userBets changes (for quick local access)
   useEffect(() => {
     localStorage.setItem('userBets', JSON.stringify(userBets));
   }, [userBets]);
 
-  // Save markets whenever they change
+  // Save markets to localStorage for quick access (online data is saved automatically)
   useEffect(() => {
-    if (markets.length > 0) {
+    if (markets.length > 0 && !storageService.isOnline()) {
       localStorage.setItem('predictionMarkets', JSON.stringify(markets));
     }
   }, [markets]);
@@ -313,33 +255,22 @@ export default function Home() {
     };
   };
 
-  const createUser = (name: string): User => {
-    const newUser: User = {
-      id: `user_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`,
-      name: name.trim(),
-      balance: 100, // Starting balance of 100 ETH
-      positions: {},
-      isAdmin: name.toLowerCase().includes('admin') // Simple admin detection
-    };
-    return newUser;
-  };
-
-  const loginUser = (name: string) => {
+  const loginUser = async (name: string) => {
     if (!name.trim()) return;
     
-    // Try to load existing user from localStorage
-    const existingUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
-    let user = existingUsers.find((u: User) => u.name.toLowerCase() === name.toLowerCase());
-    
-    if (!user) {
-      // Create new user
-      user = createUser(name);
-      existingUsers.push(user);
-      localStorage.setItem('allUsers', JSON.stringify(existingUsers));
+    try {
+      setIsLoading(true);
+      const user = await storageService.loginUser(name);
+      if (user) {
+        setCurrentUser(user);
+        setShowUserLogin(false);
+      }
+    } catch (error) {
+      console.error('Error logging in user:', error);
+      alert('Error logging in. Please try again.');
+    } finally {
+      setIsLoading(false);
     }
-    
-    setCurrentUser(user);
-    setShowUserLogin(false);
   };
 
   const logoutUser = () => {
@@ -514,7 +445,7 @@ export default function Home() {
     return `${minutes}m`;
   };
 
-  const handlePlaceBet = () => {
+  const handlePlaceBet = async () => {
     if (!currentUser) {
       alert('Please login first to place bets!');
       return;
@@ -533,76 +464,92 @@ export default function Home() {
 
     if (!selectedMarket) return;
 
-    // Calculate price impact before placing bet
-    const priceImpact = calculatePriceImpact(selectedMarket, selectedOption, amount);
-    
-    // Warn user about high price impact
-    if (priceImpact.priceImpactPercent > 5) {
-      const proceed = confirm(
-        `This bet will have a ${priceImpact.priceImpactPercent.toFixed(2)}% price impact.\n` +
-        `Price will move from ${(priceImpact.currentPrice * 100).toFixed(1)}¢ to ${(priceImpact.newPrice * 100).toFixed(1)}¢.\n` +
-        `Do you want to proceed?`
+    try {
+      // Calculate price impact before placing bet
+      const priceImpact = calculatePriceImpact(selectedMarket, selectedOption, amount);
+      
+      // Warn user about high price impact
+      if (priceImpact.priceImpactPercent > 5) {
+        const proceed = confirm(
+          `This bet will have a ${priceImpact.priceImpactPercent.toFixed(2)}% price impact.\n` +
+          `Price will move from ${(priceImpact.currentPrice * 100).toFixed(1)}¢ to ${(priceImpact.newPrice * 100).toFixed(1)}¢.\n` +
+          `Do you want to proceed?`
+        );
+        if (!proceed) return;
+      }
+
+      // Apply market maker balancing with enhanced algorithm
+      const { market: updatedMarket, liquidityAdded, priceImpact: finalPriceImpact } = applyMarketMakerBalancing(selectedMarket, selectedOption, amount);
+      
+      // Show market maker intervention if significant liquidity was added
+      if (liquidityAdded > 0.1) {
+        console.log(`Market maker added ${liquidityAdded.toFixed(3)} ETH in counter-liquidity`);
+        console.log(`Final price impact: ${finalPriceImpact.toFixed(2)}%`);
+      }
+      
+      // Update user balance and position
+      const updatedUser = { ...currentUser };
+      updatedUser.balance -= amount;
+      
+      if (!updatedUser.positions[selectedMarket.id]) {
+        updatedUser.positions[selectedMarket.id] = { option1Amount: 0, option2Amount: 0 };
+      }
+      
+      if (selectedOption === 1) {
+        updatedUser.positions[selectedMarket.id].option1Amount += amount;
+      } else {
+        updatedUser.positions[selectedMarket.id].option2Amount += amount;
+      }
+      
+      // Update storage with new balance and position
+      await storageService.updateUserBalance(updatedUser, updatedUser.balance);
+      await storageService.updatePosition(
+        updatedUser, 
+        selectedMarket.id, 
+        updatedUser.positions[selectedMarket.id].option1Amount,
+        updatedUser.positions[selectedMarket.id].option2Amount
       );
-      if (!proceed) return;
-    }
+      
+      // Update market
+      await storageService.updateMarket(selectedMarket.id, {
+        totalStaked: updatedMarket.totalStaked,
+        option1Stakes: updatedMarket.option1Stakes,
+        option2Stakes: updatedMarket.option2Stakes
+      });
+      
+      // Create bet record
+      await storageService.createBet(updatedUser, selectedMarket.id, selectedOption, amount);
+      
+      // Update local state
+      setCurrentUser(updatedUser);
+      const newMarkets = markets.map(m => m.id === selectedMarket.id ? updatedMarket : m);
+      setMarkets(newMarkets);
+      
+      // Save user bet history for quick access
+      const newBet: UserBet = {
+        marketId: selectedMarket.id,
+        option: selectedOption,
+        amount: amount,
+        timestamp: Date.now()
+      };
+      setUserBets([...userBets, newBet]);
 
-    // Apply market maker balancing with enhanced algorithm
-    const { market: updatedMarket, liquidityAdded, priceImpact: finalPriceImpact } = applyMarketMakerBalancing(selectedMarket, selectedOption, amount);
-    
-    // Show market maker intervention if significant liquidity was added
-    if (liquidityAdded > 0.1) {
-      console.log(`Market maker added ${liquidityAdded.toFixed(3)} ETH in counter-liquidity`);
-      console.log(`Final price impact: ${finalPriceImpact.toFixed(2)}%`);
+      let message = `Bet placed successfully! ${amount} ETH on "${selectedOption === 1 ? selectedMarket.option1 : selectedMarket.option2}"`;
+      if (liquidityAdded > 0) {
+        message += `\n\nMarket Maker added ${liquidityAdded.toFixed(3)} ETH liquidity to balance the market.`;
+      }
+      
+      alert(message);
+      setSelectedMarket(null);
+      setBetAmount('');
+      
+    } catch (error) {
+      console.error('Error placing bet:', error);
+      alert('Error placing bet. Please try again.');
     }
-    
-    // Update markets
-    const newMarkets = markets.map(m => m.id === selectedMarket.id ? updatedMarket : m);
-    setMarkets(newMarkets);
-
-    // Update user balance and position
-    const updatedUser = { ...currentUser };
-    updatedUser.balance -= amount;
-    
-    if (!updatedUser.positions[selectedMarket.id]) {
-      updatedUser.positions[selectedMarket.id] = { option1Amount: 0, option2Amount: 0 };
-    }
-    
-    if (selectedOption === 1) {
-      updatedUser.positions[selectedMarket.id].option1Amount += amount;
-    } else {
-      updatedUser.positions[selectedMarket.id].option2Amount += amount;
-    }
-    
-    setCurrentUser(updatedUser);
-    
-    // Save user bet history
-    const newBet: UserBet = {
-      marketId: selectedMarket.id,
-      option: selectedOption,
-      amount: amount,
-      timestamp: Date.now()
-    };
-    setUserBets([...userBets, newBet]);
-
-    // Update all users in localStorage
-    const existingUsers = JSON.parse(localStorage.getItem('allUsers') || '[]');
-    const userIndex = existingUsers.findIndex((u: User) => u.id === updatedUser.id);
-    if (userIndex !== -1) {
-      existingUsers[userIndex] = updatedUser;
-      localStorage.setItem('allUsers', JSON.stringify(existingUsers));
-    }
-
-    let message = `Bet placed successfully! ${amount} ETH on "${selectedOption === 1 ? selectedMarket.option1 : selectedMarket.option2}"`;
-    if (liquidityAdded > 0) {
-      message += `\n\nMarket Maker added ${liquidityAdded.toFixed(3)} ETH liquidity to balance the market.`;
-    }
-    
-    alert(message);
-    setSelectedMarket(null);
-    setBetAmount('');
   };
 
-  const handleCreateMarket = () => {
+  const handleCreateMarket = async () => {
     if (!currentUser) {
       alert('Please login first to create markets!');
       return;
@@ -613,24 +560,50 @@ export default function Home() {
       return;
     }
 
-    const newMarketData: Market = {
-      id: markets.length,
-      question: newMarket.question,
-      option1: newMarket.option1,
-      option2: newMarket.option2,
-      endTime: Date.now() + parseInt(newMarket.duration) * 60 * 60 * 1000,
-      totalStaked: 0,
-      option1Stakes: 0,
-      option2Stakes: 0,
-      resolved: false,
-      winner: 0
-    };
-    
-    setMarkets([...markets, newMarketData]);
-    setShowCreateMarket(false);
-    setNewMarket({ question: '', option1: '', option2: '', duration: '24' });
-    alert(`Market "${newMarket.question}" created successfully!`);
+    try {
+      const newMarketData: Omit<Market, 'id'> = {
+        question: newMarket.question,
+        option1: newMarket.option1,
+        option2: newMarket.option2,
+        endTime: Date.now() + parseInt(newMarket.duration) * 60 * 60 * 1000,
+        totalStaked: 0,
+        option1Stakes: 0,
+        option2Stakes: 0,
+        resolved: false,
+        winner: 0
+      };
+      
+      const createdMarket = await storageService.createMarket(newMarketData);
+      if (createdMarket) {
+        setMarkets([createdMarket, ...markets]);
+        setShowCreateMarket(false);
+        setNewMarket({ question: '', option1: '', option2: '', duration: '24' });
+        alert(`Market "${newMarket.question}" created successfully!`);
+      } else {
+        throw new Error('Failed to create market');
+      }
+    } catch (error) {
+      console.error('Error creating market:', error);
+      alert('Error creating market. Please try again.');
+    }
   };
+
+  // Show loading screen while initializing
+  if (isLoading && markets.length === 0) {
+    return (
+      <div className="min-h-screen bg-gray-50 dark:bg-gray-900 flex items-center justify-center">
+        <div className="text-center">
+          <div className="animate-spin rounded-full h-12 w-12 border-b-2 border-blue-600 mx-auto mb-4"></div>
+          <h2 className="text-xl font-semibold text-gray-900 dark:text-white mb-2">
+            Loading PM Demo
+          </h2>
+          <p className="text-gray-600 dark:text-gray-400">
+            {isOnlineMode ? 'Connecting to online database...' : 'Loading from local storage...'}
+          </p>
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className="min-h-screen bg-gray-50 dark:bg-gray-900">
@@ -638,9 +611,19 @@ export default function Home() {
       <header className="bg-white dark:bg-gray-800 shadow-sm border-b">
         <div className="max-w-7xl mx-auto px-4 py-4 sm:px-6 lg:px-8">
           <div className="flex justify-between items-center">
-            <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
-              🎯 PM Demo - Prediction Markets
-            </h1>
+            <div className="flex items-center gap-3">
+              <h1 className="text-2xl font-bold text-gray-900 dark:text-white">
+                🎯 PM Demo - Prediction Markets
+              </h1>
+              {/* Online/Offline Status Indicator */}
+              <div className={`text-xs px-2 py-1 rounded-full font-medium ${
+                isOnlineMode 
+                  ? 'bg-green-100 text-green-800 border border-green-200' 
+                  : 'bg-yellow-100 text-yellow-800 border border-yellow-200'
+              }`}>
+                {isOnlineMode ? '🌐 Online Database' : '💾 Local Storage'}
+              </div>
+            </div>
             <div className="flex items-center gap-4">
               {currentUser ? (
                 <>
