@@ -16,19 +16,21 @@ This project demonstrates the core functionality of a decentralized prediction m
 
 ### ✅ Current Features
 
-- **User Account System**: Login/signup with username, new users get 100 ETH starting balance
-- **Real Betting Logic**: Actual balance deduction, position tracking, and stake updates
-- **Market Display**: View all active prediction markets with real-time odds
-- **Market Creation**: Create new prediction markets with custom questions and options
-- **Position Trading**: Place real bets that affect user balances and market dynamics
-- **Enhanced Market Maker Algorithm**: Advanced LMSR-based pricing similar to Polymarket
-- **User Portfolio**: Track positions across multiple markets with real-time updates
-- **Balance Management**: Comprehensive balance validation and transaction history
-- **Data Persistence**: User accounts, positions, and market states saved in localStorage
-- **Real-time Odds**: Dynamic odds calculation based on actual stake distribution
-- **Price Impact Analysis**: Shows how large orders affect market prices
-- **Bid-Ask Spreads**: Professional trading interface with market depth
-- **Responsive UI**: Mobile-friendly interface built with Next.js and Tailwind CSS
+- **🌐 Online Database Support**: Now works with Supabase for real-time data persistence across users
+- **💾 Offline Mode**: Automatically falls back to localStorage when no database is configured  
+- **👥 User Account System**: Login/signup with username, new users get 100 ETH starting balance
+- **💰 Real Betting Logic**: Actual balance deduction, position tracking, and stake updates
+- **📈 Market Display**: View all active prediction markets with real-time odds
+- **🎯 Market Creation**: Create new prediction markets with custom questions and options
+- **📊 Position Trading**: Place real bets that affect user balances and market dynamics
+- **🧮 Enhanced Market Maker Algorithm**: Advanced LMSR-based pricing similar to Polymarket
+- **📋 User Portfolio**: Track positions across multiple markets with real-time updates
+- **💳 Balance Management**: Comprehensive balance validation and transaction history
+- **🔄 Data Persistence**: User accounts, positions, and market states saved online or locally
+- **📊 Real-time Odds**: Dynamic odds calculation based on actual stake distribution
+- **💹 Price Impact Analysis**: Shows how large orders affect market prices
+- **📈 Bid-Ask Spreads**: Professional trading interface with market depth
+- **📱 Responsive UI**: Mobile-friendly interface built with Next.js and Tailwind CSS
 
 ### 🔥 New Enhanced Market Maker Features
 
@@ -140,9 +142,11 @@ PM-demo/
 ## 🛠️ Technology Stack
 
 - **Frontend**: Next.js 15, React, TypeScript, Tailwind CSS
+- **Database**: Supabase (PostgreSQL) with localStorage fallback
 - **Smart Contracts**: Solidity, Hardhat
 - **Blockchain Integration**: Ready for ethers.js/wagmi integration
 - **Styling**: Tailwind CSS with responsive design
+- **Deployment**: GitHub Pages with static export
 
 ## 🚀 Quick Start
 
@@ -167,19 +171,16 @@ npm run dev
 ```
 Visit `http://localhost:3000` to see the application.
 
-3. **Setup Smart Contracts** (Optional - for development)
-```bash
-cd contracts
-npm install
-# Note: Requires compatible Node.js version for Hardhat
-```
+3. **Optional: Enable Online Database**
+For online data persistence with Supabase, see [ONLINE_SETUP.md](ONLINE_SETUP.md) for detailed instructions.
 
 ### Running the Demo
 
 1. Start the frontend development server
-2. Explore the prediction markets interface
-3. Test market creation and betting functionality
-4. View responsive design on different screen sizes
+2. The app works immediately with localStorage (offline mode)
+3. For online mode, follow the setup guide to configure Supabase
+4. Test market creation and betting functionality
+5. View responsive design on different screen sizes
 
 ## 🎮 Live Functionality
 
@@ -238,25 +239,31 @@ The static files will be generated in `frontend/out/` and automatically deployed
 
 ## 🔮 Future Development Roadmap
 
-### Phase 1: Web3 Integration
+### Phase 1: ✅ Online Database (COMPLETED)
+- [x] Supabase integration for data persistence  
+- [x] Automatic fallback to localStorage
+- [x] Real-time data synchronization
+- [x] User account management online
+
+### Phase 2: Web3 Integration
 - [ ] Connect wallet functionality (MetaMask, WalletConnect)
 - [ ] Deploy smart contracts to testnet
 - [ ] Integrate ethers.js for blockchain interactions
 - [ ] Real ETH transactions for betting
 
-### Phase 2: Enhanced Features
+### Phase 3: Enhanced Features
 - [ ] Market categories and filtering
-- [ ] User portfolio and position tracking
+- [ ] Enhanced user portfolio and position tracking
 - [ ] Market resolution voting mechanism
 - [ ] Liquidity pool integration
 
-### Phase 3: Advanced Functionality
+### Phase 4: Advanced Functionality
 - [ ] Multi-outcome markets (beyond binary)
 - [ ] Market maker functionality
 - [ ] Advanced charting and analytics
 - [ ] Social features and comments
 
-### Phase 4: Production Ready
+### Phase 5: Production Ready
 - [ ] Mainnet deployment
 - [ ] Security audits
 - [ ] Performance optimizations
